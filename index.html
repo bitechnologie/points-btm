@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BTM – Système de Points (v2)</title>
+  <title>BTM – Système de Points (final corrigé)</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -22,8 +22,10 @@
     const { useState, useEffect, useRef, memo } = React;
     const K = { P:'btm_participants', A:'btm_admin_password', L:'btm_logo_dataurl', O:'btm_logo_opacity', S:'btm_logo_scale', N:'btm_new_name' };
 
+    // Init admin password if missing
     if (!localStorage.getItem(K.A)) localStorage.setItem(K.A,'admin123');
 
+    // Watermark hook
     function useWatermark(){
       const [logo,setLogo]=useState(localStorage.getItem(K.L)||'');
       const [opacity,setOpacity]=useState(parseFloat(localStorage.getItem(K.O)||'0.2'));
@@ -39,6 +41,7 @@
       return {logo,opacity,scale,saveLogo:(d)=>{setLogo(d);localStorage.setItem(K.L,d)},saveOpacity:(v)=>{setOpacity(v);localStorage.setItem(K.O,String(v))},saveScale:(v)=>{setScale(v);localStorage.setItem(K.S,String(v))}};
     }
 
+    // Ranking with ties (ex æquo)
     function computeRanks(list){
       const sorted=[...list].sort((a,b)=>(b.points-a.points)||a.name.localeCompare(b.name));
       const out=[]; let lastPts=null,lastRank=0;
@@ -48,6 +51,7 @@
     const rankEmoji=(r)=>r===1?'🥇':r===2?'🥈':r===3?'🥉':`#${r}`;
     const rankColor=(r)=>r===1?'from-yellow-400 to-yellow-600':r===2?'from-gray-300 to-gray-500':r===3?'from-orange-400 to-orange-600':'from-blue-400 to-blue-600';
 
+    // Add participant bar (focus-safe + persistence of current input)
     const AddBar = memo(function AddBar({onAdd}){
       const [name,setName]=useState(localStorage.getItem(K.N)||'');
       const inputRef=useRef(null);
@@ -80,58 +84,431 @@
       const [lastUpdate,setLastUpdate]=useState(new Date());
       const {logo,opacity,scale,saveLogo,saveOpacity,saveScale}=useWatermark();
 
+      // Persist participants changes
       useEffect(()=>{ try{ localStorage.setItem(K.P, JSON.stringify(participants)); }catch(e){} setLastUpdate(new Date()); },[participants]);
       useEffect(()=>{ const h=()=>{ try{ localStorage.setItem(K.P, JSON.stringify(participants)); }catch(e){} }; window.addEventListener('beforeunload',h); return ()=>window.removeEventListener('beforeunload',h); },[participants]);
+      // Read-only auto refresh for participant mode
       useEffect(()=>{ if(mode!=='participant') return; const iv=setInterval(()=>{ const s=localStorage.getItem(K.P); if(s){ try{ setParticipants(JSON.parse(s)); setLastUpdate(new Date()); }catch(e){} } },10000); return ()=>clearInterval(iv); },[mode]);
 
+      // Auth
       const login=(as)=>{ if(as==='admin'){ const a=localStorage.getItem(K.A)||'admin123'; if(pwd===a){ setMode('admin'); setShowLogin(false); setPwd(''); } else alert('❌ Mot de passe incorrect !'); } else { setMode('participant'); setShowLogin(false); setTab('view'); } };
       const logout=()=>{ setMode(null); setShowLogin(true); setPwd(''); };
 
+      // Participant CRUD / points
       const addParticipant=(name)=>{ setParticipants(p=>[...p,{id:Date.now()+Math.floor(Math.random()*1e5),name,points:0,fastAnswers:0,slowAnswers:0,challenges:0}]); };
       const del=(id)=>{ if(confirm('Supprimer ce participant ?')) setParticipants(participants.filter(p=>p.id!==id)); };
       const addPts=(id,t)=>{ setParticipants(ps=>ps.map(p=>{ if(p.id!==id) return p; if(t==='fast') return {...p,points:p.points+5,fastAnswers:p.fastAnswers+1}; if(t==='slow') return {...p,points:p.points+3,slowAnswers:p.slowAnswers+1}; if(t==='challenge') return {...p,points:p.points+10,challenges:p.challenges+1}; return p; })); setShowAdd(false); setSel(null); };
 
+      // Copy / export
       const copyClip=()=>{ const rows=computeRanks(participants).map(p=>`${p._rank}\t${p.name}\t${p.points}\t${p.fastAnswers}\t${p.slowAnswers}\t${p.challenges}`); const text=['Rang\tNom\tPoints Total\tRéponses Rapides (5pts)\tRéponses Tardives (3pts)\tDéfis Pratiques (10pts)',...rows].join('\n'); navigator.clipboard.writeText(text).then(()=>alert('✅ Données copiées !')).catch(()=>alert('❌ Erreur lors de la copie.')); };
-      const exportCSV=()=>{ const BOM='\\uFEFF'; const headers=['Rang','Nom','Points Total','Réponses Rapides (5pts)','Réponses Tardives (3pts)','Défis Pratiques (10pts)']; const rows=computeRanks(participants).map(p=>[p._rank,`"${p.name}"`,p.points,p.fastAnswers,p.slowAnswers,p.challenges]); const csv=BOM+[headers,...rows].map(r=>r.join(';')).join('\n'); const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`classement_btm_${new Date().toLocaleDateString('fr-FR')}.csv`; a.click(); URL.revokeObjectURL(url); };
+      const exportCSV=()=>{ const BOM='\uFEFF'; const headers=['Rang','Nom','Points Total','Réponses Rapides (5pts)','Réponses Tardives (3pts)','Défis Pratiques (10pts)']; const rows=computeRanks(participants).map(p=>[p._rank,`"${p.name}"`,p.points,p.fastAnswers,p.slowAnswers,p.challenges]); const csv=BOM+[headers,...rows].map(r=>r.join(';')).join('\n'); const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`classement_btm_${new Date().toLocaleDateString('fr-FR')}.csv`; a.click(); URL.revokeObjectURL(url); };
       const reset=()=>{ if(confirm('⚠️ Supprimer toutes les données ? Action irréversible !')){ setParticipants([]); try{ localStorage.removeItem(K.P) }catch(e){} alert('✅ Données supprimées.'); } };
 
-      const handleCSVText=(text)=>{ const lines=text.split(/\r?\n/).filter(Boolean); if(!lines.length) return; const head=lines[0].split(/;|,|\t/).map(h=>h.trim()); const rows=lines.slice(1).map(l=>{const c=l.split(/;|,|\t/); const o={}; head.forEach((h,i)=>o[h]=(c[i]||'').trim()); return o}); upsert(rows); };
-      const upsert=(rows)=>{ const by=new Map(participants.map(p=>[p.name.toLowerCase(),p])); const norm=(v,d=0)=>isNaN(parseInt(v))?d:parseInt(v); rows.forEach(r=>{ const name=(r.name||r.Nom||r.Participant||'').toString().trim(); if(!name) return; const ex=by.get(name.toLowerCase()); const o={ id:ex?ex.id:Date.now()+Math.floor(Math.random()*1e5), name, points:norm(r.points??r.Points??r['Points Total'], ex?ex.points:0), fastAnswers:norm(r.fastAnswers??r.Rapides??r['Réponses Rapides (5pts)'], ex?ex.fastAnswers:0), slowAnswers:norm(r.slowAnswers??r.Tardives??r['Réponses Tardives (3pts)'], ex?ex.slowAnswers:0), challenges:norm(r.challenges??r.Défis??r['Défis Pratiques (10pts)'], ex?ex.challenges:0) }; by.set(name.toLowerCase(),o) }); setParticipants([...by.values()]); alert('✅ Import terminé.'); };
-      const importFile=async(file)=>{ if(!file) return; const ext=file.name.toLowerCase().split('.').pop(); const buf=await file.arrayBuffer(); if(ext==='csv'||ext==='txt'){ const text=new TextDecoder('utf-8').decode(new Uint8Array(buf)); handleCSVText(text); } else if(ext==='xlsx'||ext==='xls'){ const wb=XLSX.read(buf,{type:'array'}); const sh=wb.Sheets[wb.SheetNames[0]]; const json=XLSX.utils.sheet_to_json(sh,{defval:''}); upsert(json); } else alert('Format non supporté. Utilisez CSV/XLSX.'); };
-      const importGSheet=async()=>{ const url=prompt("Collez l'URL CSV public de Google Sheets :"); if(!url) return; try{ const res=await fetch(url); if(!res.ok) throw new Error('HTTP '+res.status); const text=await res.text(); handleCSVText(text) }catch(e){ alert('❌ Échec CSV. Publiez la feuille en CSV et rendez-la publique.') } };
+      // ====== Import / Ajout groupé ======
+      const handleCSVText = (text) => {
+        const lines = text.split(/\r?\n/).filter(Boolean);
+        if (!lines.length) return;
+        const head = lines[0].split(/;|,|\t/).map(h => h.trim());
+        const rows = lines.slice(1).map(l => {
+          const c = l.split(/;|,|\t/);
+          const o = {};
+          head.forEach((h,i)=> o[h] = (c[i]||'').trim());
+          return o;
+        });
+        upsert(rows);
+      };
 
-      const HeaderLegend=({right})=>(<div className="bg-white rounded-3xl shadow-xl p-4 sm:p-6 mb-4 sm:mb-6"><div className="flex items-center justify-between flex-wrap gap-3 sm:gap-4"><div className="flex items-center gap-3 sm:gap-4"><div className="text-yellow-500 text-3xl sm:text-4xl">🏆</div><div><h1 className="text-2xl sm:text-3xl font-bold text-gray-800">{mode==='admin'?'🔧 Mode Administrateur':'👥 Mode Participant (lecture seule)'}</h1><p className="text-gray-600 text-sm sm:text-base">Formation BTM - BiT Technologie</p>{mode==='participant'&&(<p className="text-xs sm:text-sm text-blue-600 mt-1">Actualisation auto 10s — dernière : {lastUpdate.toLocaleTimeString('fr-FR')}</p>)}</div></div><div className="flex gap-2 flex-wrap">{right}</div></div><div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 mt-4 sm:mt-6"><div className="flex items-center gap-3 bg-blue-50 p-3 sm:p-4 rounded-lg"><span className="text-blue-600 text-xl">⏱️</span><div><div className="font-bold text-blue-800">5 points</div><div className="text-sm text-gray-600">Réponse rapide (&lt;30min)</div></div></div><div className="flex items-center gap-3 bg-green-50 p-3 sm:p-4 rounded-lg"><span className="text-green-600 text-xl">✔️</span><div><div className="font-bold text-green-800">3 points</div><div className="text-sm text-gray-600">Réponse tardive</div></div></div><div className="flex items-center gap-3 bg-purple-50 p-3 sm:p-4 rounded-lg"><span className="text-purple-600 text-xl">🎬</span><div><div className="font-bold text-purple-800">10 points</div><div className="text-sm text-gray-600">Défi pratique réussi</div></div></div></div></div>);
+      const upsert = (rows) => {
+        const by = new Map(participants.map(p => [p.name.toLowerCase(), p]));
+        const norm = (v, d=0) => isNaN(parseInt(v)) ? d : parseInt(v);
+
+        rows.forEach(r => {
+          const name = (r.name || r.Nom || r.Participant || '').toString().trim();
+          if (!name) return;
+          const ex = by.get(name.toLowerCase());
+          const obj = {
+            id: ex ? ex.id : Date.now() + Math.floor(Math.random()*1e5),
+            name,
+            points:      norm(r.points ?? r.Points ?? r['Points Total'], ex ? ex.points : 0),
+            fastAnswers: norm(r.fastAnswers ?? r.Rapides ?? r['Réponses Rapides (5pts)'], ex ? ex.fastAnswers : 0),
+            slowAnswers: norm(r.slowAnswers ?? r.Tardives ?? r['Réponses Tardives (3pts)'], ex ? ex.slowAnswers : 0),
+            challenges:  norm(r.challenges ?? r.Défis ?? r['Défis Pratiques (10pts)'], ex ? ex.challenges : 0),
+          };
+          by.set(name.toLowerCase(), obj);
+        });
+
+        setParticipants([...by.values()]);
+        alert('✅ Import terminé.');
+      };
+
+      const importFile = async (file) => {
+        if (!file) return;
+        const ext = file.name.toLowerCase().split('.').pop();
+        const buf = await file.arrayBuffer();
+        if (ext === 'csv' || ext === 'txt') {
+          const text = new TextDecoder('utf-8').decode(new Uint8Array(buf));
+          handleCSVText(text);
+        } else if (ext === 'xlsx' || ext === 'xls') {
+          const wb = XLSX.read(buf, { type: 'array' });
+          const sh = wb.Sheets[wb.SheetNames[0]];
+          const json = XLSX.utils.sheet_to_json(sh, { defval:'' });
+          upsert(json);
+        } else {
+          alert('Format non supporté. Utilisez CSV/XLSX.');
+        }
+      };
+
+      const importGSheet = async () => {
+        const url = prompt("Collez l'URL CSV public de Google Sheets :");
+        if (!url) return;
+        try {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const text = await res.text();
+          handleCSVText(text);
+        } catch (e) {
+          alert('❌ Échec CSV. Publiez la feuille en CSV et rendez-la publique.');
+        }
+      };
+
+      // ➕ Ajout groupé via liste collée
+      const bulkAddNames = (raw) => {
+        const names = raw
+          .split(/\r?\n|,|;|\t/)
+          .map(s => s.trim())
+          .filter(Boolean);
+
+        if (!names.length) return alert('Liste vide.');
+        setParticipants(prev => ([
+          ...prev,
+          ...names.map(name => ({
+            id: Date.now() + Math.floor(Math.random()*1e5),
+            name,
+            points: 0, fastAnswers: 0, slowAnswers: 0, challenges: 0
+          }))
+        ]));
+        alert(`✅ ${names.length} participant(s) ajouté(s).`);
+      };
+
+      // Header block
+      const HeaderLegend=({right})=>(
+        <div className="bg-white rounded-3xl shadow-xl p-4 sm:p-6 mb-4 sm:mb-6">
+          <div className="flex items-center justify-between flex-wrap gap-3 sm:gap-4">
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="text-yellow-500 text-3xl sm:text-4xl">🏆</div>
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">{mode==='admin'?'🔧 Mode Administrateur':'👥 Mode Participant (lecture seule)'}</h1>
+                <p className="text-gray-600 text-sm sm:text-base">Formation BTM - BiT Technologie</p>
+                {mode==='participant'&&(
+                  <p className="text-xs sm:text-sm text-blue-600 mt-1">Actualisation auto 10s — dernière : {lastUpdate.toLocaleTimeString('fr-FR')}</p>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2 flex-wrap">{right}</div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 mt-4 sm:mt-6">
+            <div className="flex items-center gap-3 bg-blue-50 p-3 sm:p-4 rounded-lg">
+              <span className="text-blue-600 text-xl">⏱️</span>
+              <div>
+                <div className="font-bold text-blue-800">5 points</div>
+                <div className="text-sm text-gray-600">Réponse rapide (&lt;30min)</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 bg-green-50 p-3 sm:p-4 rounded-lg">
+              <span className="text-green-600 text-xl">✔️</span>
+              <div>
+                <div className="font-bold text-green-800">3 points</div>
+                <div className="text-sm text-gray-600">Réponse tardive</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 bg-purple-50 p-3 sm:p-4 rounded-lg">
+              <span className="text-purple-600 text-xl">🎬</span>
+              <div>
+                <div className="font-bold text-purple-800">10 points</div>
+                <div className="text-sm text-gray-600">Défi pratique réussi</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
 
       const ranked=computeRanks(participants);
       const podGroups=[1,2,3].map(r=>ranked.filter(p=>p._rank===r));
-      const headerRightParticipant=(<><button onClick={()=>{const s=localStorage.getItem(K.P); if(s){try{setParticipants(JSON.parse(s)); setLastUpdate(new Date()); alert('✅ Données actualisées !')}catch(e){}}}} className="bg-blue-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm sm:text-base">🔄 Actualiser</button><button onClick={logout} className="bg-gray-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-gray-700 transition text-sm sm:text-base">🚪 Déconnexion</button></>);
-      const headerRightAdmin=(<><button onClick={()=>setTab('participants')} className={`px-3 sm:px-4 py-2 rounded-lg ${tab==='participants'?'bg-blue-600 text-white':'bg-gray-100'}`}>Participants</button><button onClick={()=>setTab('import')} className={`px-3 sm:px-4 py-2 rounded-lg ${tab==='import'?'bg-blue-600 text-white':'bg-gray-100'}`}>Import</button><button onClick={()=>setTab('settings')} className={`px-3 sm:px-4 py-2 rounded-lg ${tab==='settings'?'bg-blue-600 text-white':'bg-gray-100'}`}>Paramètres</button><button onClick={logout} className="bg-gray-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-gray-700 transition">🚪 Déconnexion</button></>);
+      const headerRightParticipant=(<>
+        <button onClick={()=>{const s=localStorage.getItem(K.P); if(s){try{setParticipants(JSON.parse(s)); setLastUpdate(new Date()); alert('✅ Données actualisées !')}catch(e){}}}}
+          className="bg-blue-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm sm:text-base">🔄 Actualiser</button>
+        <button onClick={logout} className="bg-gray-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-gray-700 transition text-sm sm:text-base">🚪 Déconnexion</button>
+      </>);
+      const headerRightAdmin=(<>
+        <button onClick={()=>setTab('participants')} className={`px-3 sm:px-4 py-2 rounded-lg ${tab==='participants'?'bg-blue-600 text-white':'bg-gray-100'}`}>Participants</button>
+        <button onClick={()=>setTab('import')} className={`px-3 sm:px-4 py-2 rounded-lg ${tab==='import'?'bg-blue-600 text-white':'bg-gray-100'}`}>Import</button>
+        <button onClick={()=>setTab('settings')} className={`px-3 sm:px-4 py-2 rounded-lg ${tab==='settings'?'bg-blue-600 text-white':'bg-gray-100'}`}>Paramètres</button>
+        <button onClick={logout} className="bg-gray-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-gray-700 transition">🚪 Déconnexion</button>
+      </>);
 
       function LeaderboardBlocks({readonly}){
         return (<>
           {!readonly && <AddBar onAdd={addParticipant} />}
-          {ranked.length>0 && (<div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6 mb-4 sm:mb-6"><h2 className="text-lg sm:text-xl font-bold text-gray-800 mb-3 sm:mb-4">🏆 Podium (ex æquo gérés)</h2><div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">{[1,2,3].map((r,idx)=>(<div key={r} className={`p-4 rounded-xl ${r===1?'bg-yellow-50 border-2 border-yellow-300':r===2?'bg-gray-50 border-2 border-gray-300':'bg-orange-50 border-2 border-orange-300'}`}><div className="text-2xl mb-2">{rankEmoji(r)}</div>{podGroups[idx].length===0?(<div className="text-gray-500">—</div>):podGroups[idx].map(p=>(<div key={p.id} className="flex items-center justify-between py-1"><div className="font-semibold text-gray-800">{p.name}</div><div className="text-gray-900 font-bold">{p.points} pts</div></div>))}</div>))}</div></div>)}
+          {ranked.length>0 && (
+            <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6 mb-4 sm:mb-6">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-800 mb-3 sm:mb-4">🏆 Podium (ex æquo gérés)</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
+                {[1,2,3].map((r,idx)=>(
+                  <div key={r} className={`p-4 rounded-xl ${r===1?'bg-yellow-50 border-2 border-yellow-300':r===2?'bg-gray-50 border-2 border-gray-300':'bg-orange-50 border-2 border-orange-300'}`}>
+                    <div className="text-2xl mb-2">{rankEmoji(r)}</div>
+                    {podGroups[idx].length===0?(
+                      <div className="text-gray-500">—</div>
+                    ):podGroups[idx].map(p=>(
+                      <div key={p.id} className="flex items-center justify-between py-1">
+                        <div className="font-semibold text-gray-800">{p.name}</div>
+                        <div className="text-gray-900 font-bold">{p.points} pts</div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="bg-white rounded-2xl shadow-xl overflow-hidden mb-4 sm:mb-6">
-            <div className="p-4 sm:p-6 bg-gradient-to-r from-blue-600 to-indigo-600 text-white"><h2 className="text-xl sm:text-2xl font-bold">📈 Classement Complet (ex æquo gérés)</h2></div>
-            {ranked.length===0?(<div className="p-10 sm:p-12 text-center text-gray-500"><div className="text-5xl sm:text-6xl mb-2 opacity-30">🏆</div><p className="text-lg sm:text-xl">Aucun participant</p></div>):(<div className="overflow-x-auto"><table className="w-full text-sm sm:text-base"><thead className="bg-gray-100 text-left"><tr><th className="px-4 sm:px-6 py-3 sm:py-4 font-bold text-gray-700">Rang</th><th className="px-4 sm:px-6 py-3 sm:py-4 font-bold text-gray-700">Participant</th><th className="px-4 sm:px-6 py-3 sm:py-4 text-center font-bold text-gray-700">Points</th><th className="px-4 sm:px-6 py-3 sm:py-4 text-center font-bold text-gray-700">Rapides</th><th className="px-4 sm:px-6 py-3 sm:py-4 text-center font-bold text-gray-700">Tardives</th><th className="px-4 sm:px-6 py-3 sm:py-4 text-center font-bold text-gray-700">Défis</th>{!readonly&&<th className="px-4 sm:px-6 py-3 sm:py-4 text-center font-bold text-gray-700">Actions</th>}</tr></thead><tbody>{ranked.map(p=>(<tr key={p.id} className={`border-t hover:bg-gray-50 ${p._rank<=3?'bg-yellow-50':''}`}><td className="px-4 sm:px-6 py-3 sm:py-4"><span className="text-xl sm:text-2xl font-bold">{rankEmoji(p._rank)}</span></td><td className="px-4 sm:px-6 py-3 sm:py-4"><span className="font-semibold text-gray-800">{p.name}</span></td><td className="px-4 sm:px-6 py-3 sm:py-4 text-center"><span className={`inline-block px-3 sm:px-4 py-1.5 sm:py-2 rounded-full font-bold text-white bg-gradient-to-r ${rankColor(p._rank)}`}>{p.points}</span></td><td className="px-4 sm:px-6 py-3 sm:py-4 text-center"><span className="text-blue-600 font-semibold">{p.fastAnswers} × 5pts</span></td><td className="px-4 sm:px-6 py-3 sm:py-4 text-center"><span className="text-green-600 font-semibold">{p.slowAnswers} × 3pts</span></td><td className="px-4 sm:px-6 py-3 sm:py-4 text-center"><span className="text-purple-600 font-semibold">{p.challenges} × 10pts</span></td>{!readonly&&(<td className="px-4 sm:px-6 py-3 sm:py-4"><div className="flex gap-2 justify-center"><button onClick={()=>{setSel(p.id); setShowAdd(true)}} className="bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 transition">➕</button><button onClick={()=>del(p.id)} className="bg-red-500 text-white px-3 py-2 rounded-lg hover:bg-red-600 transition">🗑️</button></div></td>)}</tr>))}</tbody></table></div>)}
+            <div className="p-4 sm:p-6 bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+              <h2 className="text-xl sm:text-2xl font-bold">📈 Classement Complet (ex æquo gérés)</h2>
+            </div>
+            {ranked.length===0?(
+              <div className="p-10 sm:p-12 text-center text-gray-500">
+                <div className="text-5xl sm:text-6xl mb-2 opacity-30">🏆</div>
+                <p className="text-lg sm:text-xl">Aucun participant</p>
+              </div>
+            ):(
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm sm:text-base">
+                  <thead className="bg-gray-100 text-left">
+                    <tr>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 font-bold text-gray-700">Rang</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 font-bold text-gray-700">Participant</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 text-center font-bold text-gray-700">Points</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 text-center font-bold text-gray-700">Rapides</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 text-center font-bold text-gray-700">Tardives</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 text-center font-bold text-gray-700">Défis</th>
+                      {!readonly&&<th className="px-4 sm:px-6 py-3 sm:py-4 text-center font-bold text-gray-700">Actions</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ranked.map(p=>(
+                      <tr key={p.id} className={`border-t hover:bg-gray-50 ${p._rank<=3?'bg-yellow-50':''}`}>
+                        <td className="px-4 sm:px-6 py-3 sm:py-4">
+                          <span className="text-xl sm:text-2xl font-bold">{rankEmoji(p._rank)}</span>
+                        </td>
+                        <td className="px-4 sm:px-6 py-3 sm:py-4">
+                          <span className="font-semibold text-gray-800">{p.name}</span>
+                        </td>
+                        <td className="px-4 sm:px-6 py-3 sm:py-4 text-center">
+                          <span className={`inline-block px-3 sm:px-4 py-1.5 sm:py-2 rounded-full font-bold text-white bg-gradient-to-r ${rankColor(p._rank)}`}>{p.points}</span>
+                        </td>
+                        <td className="px-4 sm:px-6 py-3 sm:py-4 text-center">
+                          <span className="text-blue-600 font-semibold">{p.fastAnswers} × 5pts</span>
+                        </td>
+                        <td className="px-4 sm:px-6 py-3 sm:py-4 text-center">
+                          <span className="text-green-600 font-semibold">{p.slowAnswers} × 3pts</span>
+                        </td>
+                        <td className="px-4 sm:px-6 py-3 sm:py-4 text-center">
+                          <span className="text-purple-600 font-semibold">{p.challenges} × 10pts</span>
+                        </td>
+                        {!readonly&&(
+                          <td className="px-4 sm:px-6 py-3 sm:py-4">
+                            <div className="flex gap-2 justify-center">
+                              <button onClick={()=>{setSel(p.id); setShowAdd(true)}} className="bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 transition">➕</button>
+                              <button onClick={()=>del(p.id)} className="bg-red-500 text-white px-3 py-2 rounded-lg hover:bg-red-600 transition">🗑️</button>
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-          {participants.length>0 && (<div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6"><h2 className="text-lg sm:text-xl font-bold text-gray-800 mb-3">📊 Statistiques Globales</h2><div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4"><div className="bg-blue-50 p-3 sm:p-4 rounded-lg text-center"><div className="text-2xl sm:text-3xl font-bold text-blue-600">{participants.length}</div><div className="text-xs sm:text-sm text-gray-600">Participants</div></div><div className="bg-green-50 p-3 sm:p-4 rounded-lg text-center"><div className="text-2xl sm:text-3xl font-bold text-green-600">{participants.reduce((s,p)=>s+p.points,0)}</div><div className="text-xs sm:text-sm text-gray-600">Points Totaux</div></div><div className="bg-purple-50 p-3 sm:p-4 rounded-lg text-center"><div className="text-2xl sm:text-3xl font-bold text-purple-600">{participants.reduce((s,p)=>s+p.challenges,0)}</div><div className="text-xs sm:text-sm text-gray-600">Défis Réalisés</div></div><div className="bg-yellow-50 p-3 sm:p-4 rounded-lg text-center"><div className="text-2xl sm:text-3xl font-bold text-yellow-600">{participants.length>0?Math.round(participants.reduce((s,p)=>s+p.points,0)/participants.length):0}</div><div className="text-xs sm:text-sm text-gray-600">Moyenne Points</div></div></div></div>)}
+          {participants.length>0 && (
+            <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-800 mb-3">📊 Statistiques Globales</h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+                <div className="bg-blue-50 p-3 sm:p-4 rounded-lg text-center">
+                  <div className="text-2xl sm:text-3xl font-bold text-blue-600">{participants.length}</div>
+                  <div className="text-xs sm:text-sm text-gray-600">Participants</div>
+                </div>
+                <div className="bg-green-50 p-3 sm:p-4 rounded-lg text-center">
+                  <div className="text-2xl sm:text-3xl font-bold text-green-600">{participants.reduce((s,p)=>s+p.points,0)}</div>
+                  <div className="text-xs sm:text-sm text-gray-600">Points Totaux</div>
+                </div>
+                <div className="bg-purple-50 p-3 sm:p-4 rounded-lg text-center">
+                  <div className="text-2xl sm:text-3xl font-bold text-purple-600">{participants.reduce((s,p)=>s+p.challenges,0)}</div>
+                  <div className="text-xs sm:text-sm text-gray-600">Défis Réalisés</div>
+                </div>
+                <div className="bg-yellow-50 p-3 sm:p-4 rounded-lg text-center">
+                  <div className="text-2xl sm:text-3xl font-bold text-yellow-600">{participants.length>0?Math.round(participants.reduce((s,p)=>s+p.points,0)/participants.length):0}</div>
+                  <div className="text-xs sm:text-sm text-gray-600">Moyenne Points</div>
+                </div>
+              </div>
+            </div>
+          )}
         </>);
       }
 
+      // Login screen
       if(showLogin){
-        return (<div className="min-h-screen flex items-center justify-center p-4"><div className="bg-white rounded-3xl shadow-2xl p-6 sm:p-8 max-w-md w-full"><div className="text-center mb-6 sm:mb-8"><div className="bg-gradient-to-br from-yellow-400 to-yellow-600 p-3 sm:p-4 rounded-full inline-block mb-4 text-white text-3xl sm:text-4xl">🏆</div><h1 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-1 sm:mb-2">Système de Points</h1><p className="text-gray-600 text-sm sm:text-base">Formation Windows 11 - BiT Technologie</p></div><div className="space-y-4"><div className="bg-blue-50 p-4 sm:p-6 rounded-2xl border-2 border-blue-200"><div className="flex items-center gap-2 sm:gap-3 mb-3"><span className="text-blue-600 text-lg sm:text-xl">🔒</span><h3 className="font-bold text-base sm:text-lg text-gray-800">Connexion Administrateur</h3></div><input type="password" value={pwd} onChange={e=>setPwd(e.target.value)} onKeyDown={e=>e.key==='Enter'&&login('admin')} placeholder="Mot de passe admin" className="w-full px-3 sm:px-4 py-2 sm:py-3 border-2 border-gray-300 rounded-lg mb-3 focus:border-blue-500 focus:outline-none" /><button onClick={()=>login('admin')} className="w-full bg-blue-600 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg hover:bg-blue-700 transition font-semibold">Se connecter en Admin</button><p className="text-xs text-gray-500 mt-2 text-center">Par défaut : <b>admin123</b> (modifiable dans Paramètres)</p></div><div className="bg-green-50 p-4 sm:p-6 rounded-2xl border-2 border-green-200"><div className="flex items-center gap-2 sm:gap-3 mb-3"><span className="text-green-600 text-lg sm:text-xl">👁️</span><h3 className="font-bold text-base sm:text-lg text-gray-800">Mode Participant</h3></div><p className="text-sm text-gray-600 mb-3">Tout est visible en lecture seule (podium, classement, stats).</p><button onClick={()=>login('participant')} className="w-full bg-green-600 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg hover:bg-green-700 transition font-semibold">Entrer</button></div></div></div></div>); }
+        return (
+          <div className="min-h-screen flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl shadow-2xl p-6 sm:p-8 max-w-md w-full">
+              <div className="text-center mb-6 sm:mb-8">
+                <div className="bg-gradient-to-br from-yellow-400 to-yellow-600 p-3 sm:p-4 rounded-full inline-block mb-4 text-white text-3xl sm:text-4xl">🏆</div>
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-1 sm:mb-2">Système de Points</h1>
+                <p className="text-gray-600 text-sm sm:text-base">Formation Windows 11 - BiT Technologie</p>
+              </div>
+              <div className="space-y-4">
+                <div className="bg-blue-50 p-4 sm:p-6 rounded-2xl border-2 border-blue-200">
+                  <div className="flex items-center gap-2 sm:gap-3 mb-3">
+                    <span className="text-blue-600 text-lg sm:text-xl">🔒</span>
+                    <h3 className="font-bold text-base sm:text-lg text-gray-800">Connexion Administrateur</h3>
+                  </div>
+                  <input type="password" value={pwd} onChange={e=>setPwd(e.target.value)} onKeyDown={e=>e.key==='Enter'&&login('admin')} placeholder="Mot de passe admin" className="w-full px-3 sm:px-4 py-2 sm:py-3 border-2 border-gray-300 rounded-lg mb-3 focus:border-blue-500 focus:outline-none" />
+                  <button onClick={()=>login('admin')} className="w-full bg-blue-600 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg hover:bg-blue-700 transition font-semibold">Se connecter en Admin</button>
+                  <p className="text-xs text-gray-500 mt-2 text-center">Par défaut : <b>admin123</b> (modifiable dans Paramètres)</p>
+                </div>
+                <div className="bg-green-50 p-4 sm:p-6 rounded-2xl border-2 border-green-200">
+                  <div className="flex items-center gap-2 sm:gap-3 mb-3">
+                    <span className="text-green-600 text-lg sm:text-xl">👁️</span>
+                    <h3 className="font-bold text-base sm:text-lg text-gray-800">Mode Participant</h3>
+                  </div>
+                  <p className="text-sm text-gray-600 mb-3">Tout est visible en lecture seule (podium, classement, stats).</p>
+                  <button onClick={()=>login('participant')} className="w-full bg-green-600 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg hover:bg-green-700 transition font-semibold">Entrer</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
 
+      // Participant view
       if (mode==='participant'){
-        return (<div className="min-h-screen p-3 sm:p-4"><div className="max-w-6xl mx-auto"><HeaderLegend right={headerRightParticipant} /><LeaderboardBlocks readonly /></div></div>);
+        const right = headerRightParticipant;
+        return (
+          <div className="min-h-screen p-3 sm:p-4">
+            <div className="max-w-6xl mx-auto">
+              <HeaderLegend right={right} />
+              <LeaderboardBlocks readonly />
+            </div>
+          </div>
+        );
       }
 
-      return (<div className="min-h-screen p-3 sm:p-4"><div className="max-w-6xl mx-auto"><HeaderLegend right={headerRightAdmin} />{tab==='participants' && (<LeaderboardBlocks readonly={false} />)}{tab==='import' && (<div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6 mb-4 sm:mb-6"><h2 className="text-lg sm:text-xl font-bold text-gray-800 mb-3 sm:mb-4">📥 Import de participants</h2><div className="space-y-4"><div className="p-4 rounded-lg border-2 border-dashed"><p className="mb-2 font-semibold">Importer un fichier CSV/XLSX</p><input type="file" accept=".csv,.txt,.xlsx,.xls" onChange={e=>importFile(e.target.files[0])} /><p className="text-sm text-gray-600 mt-2">Colonnes : <code>Nom</code>/<code>Participant</code> (obligatoire), <code>Points</code>, <code>Rapides</code>, <code>Tardives</code>, <code>Défis</code> (facultatives).</p></div><div className="p-4 rounded-lg border-2 border-dashed"><p className="mb-2 font-semibold">Importer via Google Sheets (CSV public)</p><button onClick={importGSheet} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">Coller l'URL CSV</button><p className="text-sm text-gray-600 mt-2">Google Sheets → Fichier → Publier sur le Web → CSV → lien public.</p></div></div></div>)}{tab==='settings' && (<div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6 mb-4 sm:mb-6 space-y-6"><h2 className="text-lg sm:text-xl font-bold text-gray-800">⚙️ Paramètres</h2><div className="grid md:grid-cols-2 gap-4 sm:gap-6"><div className="p-4 rounded-lg border"><h3 className="font-semibold mb-2">Mot de passe administrateur</h3><label className="block text-sm text-gray-600 mb-1">Nouveau mot de passe</label><input id="newpass" type="password" className="w-full px-3 py-2 border rounded mb-2" placeholder="••••••••"/><label className="block text-sm text-gray-600 mb-1">Confirmer</label><input id="newpass2" type="password" className="w-full px-3 py-2 border rounded mb-3" placeholder="••••••••"/><button className="bg-blue-600 text-white px-4 py-2 rounded" onClick={()=>{ const p1=document.getElementById('newpass').value; const p2=document.getElementById('newpass2').value; if(!p1) return alert('Mot de passe vide.'); if(p1!==p2) return alert('Les mots de passe ne correspondent pas.'); localStorage.setItem(K.A,p1); alert('✅ Mot de passe mis à jour.'); document.getElementById('newpass').value=''; document.getElementById('newpass2').value=''; }}>Enregistrer</button><p className="text-xs text-gray-500 mt-2">Stocké localement (navigateur courant).</p></div><div className="p-4 rounded-lg border"><h3 className="font-semibold mb-2">Logo BIT TECHNOLOGIE MALI (filigrane)</h3><input type="file" accept="image/*" onChange={(e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>saveLogo(r.result); r.readAsDataURL(f); }} /><div className="mt-3"><label className="block text-sm text-gray-600">Opacité : {opacity.toFixed(2)}</label><input type="range" min="0" max="1" step="0.05" value={opacity} onChange={e=>saveOpacity(parseFloat(e.target.value))} className="w-full"/></div><div className="mt-3"><label className="block text-sm text-gray-600">Taille (scale) : {scale.toFixed(2)}</label><input type="range" min="0.2" max="2" step="0.05" value={scale} onChange={e=>saveScale(parseFloat(e.target.value))} className="w-full"/></div><div className="mt-3"><button className="px-3 py-2 rounded bg-gray-100" onClick={()=>{saveLogo(''); alert('Filigrane retiré.')}}>Retirer le filigrane</button></div><p className="text-xs text-gray-500 mt-2">Le filigrane est stocké localement (base64).</p></div></div></div>)}</div></div>);
-
-      {/* Modal points */}
-      if (mode==='admin' && showAdd) {
-        return (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3"><div className="bg-white rounded-2xl p-6 sm:p-8 max-w-md w-full"><h3 className="text-xl sm:text-2xl font-bold mb-5 sm:mb-6 text-gray-800">Ajouter des Points</h3><div className="space-y-3 sm:space-y-4"><button onClick={()=>addPts(sel,'fast')} className="w-full flex items-center gap-3 bg-blue-50 hover:bg-blue-100 p-4 rounded-lg transition"><span className="text-blue-600 text-xl">⏱️</span><div className="text-left flex-1"><div className="font-bold text-blue-800">Réponse Rapide</div><div className="text-sm text-gray-600">+5 points (&lt;30min)</div></div></button><button onClick={()=>addPts(sel,'slow')} className="w-full flex items-center gap-3 bg-green-50 hover:bg-green-100 p-4 rounded-lg transition"><span className="text-green-600 text-xl">✔️</span><div className="text-left flex-1"><div className="font-bold text-green-800">Réponse Tardive</div><div className="text-sm text-gray-600">+3 points</div></div></button><button onClick={()=>addPts(sel,'challenge')} className="w-full flex items-center gap-3 bg-purple-50 hover:bg-purple-100 p-4 rounded-lg transition"><span className="text-purple-600 text-xl">🎬</span><div className="text-left flex-1"><div className="font-bold text-purple-800">Défi Pratique</div><div className="text-sm text-gray-600">+10 points</div></div></button><button onClick={()=>{setShowAdd(false); setSel(null);}} className="w-full bg-gray-200 hover:bg-gray-300 p-4 rounded-lg transition font-semibold">Annuler</button></div></div></div>);
-      }
+      // Admin view
+      return (
+        <div className="min-h-screen p-3 sm:p-4">
+          <div className="max-w-6xl mx-auto">
+            <HeaderLegend right={headerRightAdmin} />
+            {tab==='participants' && (<LeaderboardBlocks readonly={false} />)}
+            {tab==='import' && (
+              <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6 mb-4 sm:mb-6">
+                <h2 className="text-lg sm:text-xl font-bold text-gray-800 mb-3 sm:mb-4">📥 Ajout / Import en groupe</h2>
+                <div className="grid md:grid-cols-2 gap-4 sm:gap-6">
+                  <div className="p-4 rounded-lg border-2 border-dashed">
+                    <p className="mb-2 font-semibold">Importer un fichier CSV/XLSX</p>
+                    <input type="file" accept=".csv,.txt,.xlsx,.xls" onChange={e=>importFile(e.target.files[0])} />
+                    <p className="text-sm text-gray-600 mt-2">
+                      Colonnes reconnues : <code>Nom</code>/<code>Participant</code> (obligatoire),
+                      <code>Points</code>, <code>Rapides</code>, <code>Tardives</code>, <code>Défis</code> (facultatives).
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-lg border-2 border-dashed">
+                    <p className="mb-2 font-semibold">Importer via Google Sheets (CSV public)</p>
+                    <button onClick={importGSheet} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">Coller l'URL CSV</button>
+                    <p className="text-sm text-gray-600 mt-2">Sheets → Fichier → Publier sur le Web → Format CSV → lien public.</p>
+                  </div>
+                </div>
+                <div className="mt-6 p-4 rounded-lg border">
+                  <p className="mb-2 font-semibold">Ajouter une liste de noms (coller)</p>
+                  <textarea id="bulkNames" className="w-full h-36 p-3 border rounded" placeholder={"Un nom par ligne\nOU séparés par , ; ou tabulation"}></textarea>
+                  <div className="mt-3 flex gap-2">
+                    <button className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition"
+                      onClick={()=>{ const raw=document.getElementById('bulkNames').value||''; bulkAddNames(raw); document.getElementById('bulkNames').value=''; }}>
+                      ➕ Ajouter ces participants
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {tab==='settings' && (
+              <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6 mb-4 sm:mb-6 space-y-6">
+                <h2 className="text-lg sm:text-xl font-bold text-gray-800">⚙️ Paramètres</h2>
+                <div className="grid md:grid-cols-2 gap-4 sm:gap-6">
+                  <div className="p-4 rounded-lg border">
+                    <h3 className="font-semibold mb-2">Mot de passe administrateur</h3>
+                    <label className="block text-sm text-gray-600 mb-1">Nouveau mot de passe</label>
+                    <input id="newpass" type="password" className="w-full px-3 py-2 border rounded mb-2" placeholder="••••••••"/>
+                    <label className="block text-sm text-gray-600 mb-1">Confirmer</label>
+                    <input id="newpass2" type="password" className="w-full px-3 py-2 border rounded mb-3" placeholder="••••••••"/>
+                    <button className="bg-blue-600 text-white px-4 py-2 rounded"
+                      onClick={()=>{ const p1=document.getElementById('newpass').value; const p2=document.getElementById('newpass2').value; if(!p1) return alert('Mot de passe vide.'); if(p1!==p2) return alert('Les mots de passe ne correspondent pas.'); localStorage.setItem(K.A,p1); alert('✅ Mot de passe mis à jour.'); document.getElementById('newpass').value=''; document.getElementById('newpass2').value=''; }}>
+                      Enregistrer
+                    </button>
+                    <p className="text-xs text-gray-500 mt-2">Stocké localement (navigateur courant).</p>
+                  </div>
+                  <div className="p-4 rounded-lg border">
+                    <h3 className="font-semibold mb-2">Logo BIT TECHNOLOGIE MALI (filigrane)</h3>
+                    <input type="file" accept="image/*" onChange={(e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>saveLogo(r.result); r.readAsDataURL(f); }} />
+                    <div className="mt-3">
+                      <label className="block text-sm text-gray-600">Opacité : {opacity.toFixed(2)}</label>
+                      <input type="range" min="0" max="1" step="0.05" value={opacity} onChange={e=>saveOpacity(parseFloat(e.target.value))} className="w-full"/>
+                    </div>
+                    <div className="mt-3">
+                      <label className="block text-sm text-gray-600">Taille (scale) : {scale.toFixed(2)}</label>
+                      <input type="range" min="0.2" max="2" step="0.05" value={scale} onChange={e=>saveScale(parseFloat(e.target.value))} className="w-full"/>
+                    </div>
+                    <div className="mt-3">
+                      <button className="px-3 py-2 rounded bg-gray-100" onClick={()=>{saveLogo(''); alert('Filigrane retiré.')}}>Retirer le filigrane</button>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">Le filigrane est stocké localement (base64).</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* Modal points overlay inside Admin view */}
+            {mode==='admin' && showAdd && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3">
+                <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-md w-full">
+                  <h3 className="text-xl sm:text-2xl font-bold mb-5 sm:mb-6 text-gray-800">Ajouter des Points</h3>
+                  <div className="space-y-3 sm:space-y-4">
+                    <button onClick={()=>addPts(sel,'fast')} className="w-full flex items-center gap-3 bg-blue-50 hover:bg-blue-100 p-4 rounded-lg transition">
+                      <span className="text-blue-600 text-xl">⏱️</span>
+                      <div className="text-left flex-1">
+                        <div className="font-bold text-blue-800">Réponse Rapide</div>
+                        <div className="text-sm text-gray-600">+5 points (&lt;30min)</div>
+                      </div>
+                    </button>
+                    <button onClick={()=>addPts(sel,'slow')} className="w-full flex items-center gap-3 bg-green-50 hover:bg-green-100 p-4 rounded-lg transition">
+                      <span className="text-green-600 text-xl">✔️</span>
+                      <div className="text-left flex-1">
+                        <div className="font-bold text-green-800">Réponse Tardive</div>
+                        <div className="text-sm text-gray-600">+3 points</div>
+                      </div>
+                    </button>
+                    <button onClick={()=>addPts(sel,'challenge')} className="w-full flex items-center gap-3 bg-purple-50 hover:bg-purple-100 p-4 rounded-lg transition">
+                      <span className="text-purple-600 text-xl">🎬</span>
+                      <div className="text-left flex-1">
+                        <div className="font-bold text-purple-800">Défi Pratique</div>
+                        <div className="text-sm text-gray-600">+10 points</div>
+                      </div>
+                    </button>
+                    <button onClick={()=>{ setShowAdd(false); setSel(null); }} className="w-full bg-gray-200 hover:bg-gray-300 p-4 rounded-lg transition font-semibold">
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
     }
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
